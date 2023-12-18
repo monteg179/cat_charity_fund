@@ -1,60 +1,62 @@
-from datetime import datetime
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    CharityBase,
     CharityProject,
     Donation,
 )
 
 
-async def check_not_invested(session: AsyncSession):
-    project = await session.execute(
-        select(CharityProject)
-        .where(CharityProject.fully_invested == 0)
-        .order_by('create_date')
-    )
-    project = project.scalars().first()
-    donation = await session.execute(
-        select(Donation)
-        .where(Donation.fully_invested == 0)
-        .order_by('create_date'))
-    donation = donation.scalars().first()
-    return project, donation
+class Investment:
 
+    @staticmethod
+    async def query(session: AsyncSession, charity: type[CharityBase]) -> CharityBase:
+        query = await session.execute(
+            select(charity)
+            .where(charity.fully_invested == 0)
+            .order_by('create_date')
+        )
+        return query.scalars().first()
 
-async def investment_process(
-    session: AsyncSession,
-    obj
-):
-    project, donation = await check_not_invested(session)
-    if not project or not donation:
+    @staticmethod
+    async def process(session: AsyncSession, charity: CharityBase) -> CharityBase:
+        project = await Investment.query(session, CharityProject)
+        if not project:
+            await session.refresh(charity)
+            return charity
+        donation = await Investment.query(session, Donation)
+        if not donation:
+            await session.refresh(charity)
+            return charity
+        project.investment(donation)
+        session.add(project)
+        session.add(donation)
         await session.commit()
-        await session.refresh(obj)
-        return obj
-    balance_project = project.full_amount - project.invested_amount
-    balance_donation = donation.full_amount - donation.invested_amount
-    if balance_project > balance_donation:
-        project.invested_amount += balance_donation
-        donation.invested_amount += balance_donation
-        donation.fully_invested = True
-        donation.close_date = datetime.now()
-    elif balance_project == balance_donation:
-        project.invested_amount += balance_donation
-        donation.invested_amount += balance_donation
-        project.fully_invested = True
-        donation.fully_invested = True
-        project.close_date = datetime.now()
-        donation.close_date = datetime.now()
-    else:
-        project.invested_amount += balance_project
-        donation.invested_amount += balance_project
-        project.fully_invested = True
-        project.close_date = datetime.now()
-    session.add(project)
-    session.add(donation)
-    await session.commit()
-    await session.refresh(project)
-    await session.refresh(donation)
-    return await investment_process(session, obj)
+        return await Investment.process(session, charity)
+
+    @staticmethod
+    async def project_process(session: AsyncSession, project: CharityProject) -> CharityProject:
+        while not project.fully_invested:
+            donation = await Investment.query(session, Donation)
+            if not donation:
+                break
+            project.investment(donation)
+            session.add(project)
+            session.add(donation)
+            await session.commit()
+            await session.refresh(project)
+        return project
+
+    @staticmethod
+    async def donation_process(session: AsyncSession, donation: Donation) -> Donation:
+        while not donation.fully_invested:
+            project = await Investment.query(session, CharityProject)
+            if not project:
+                break
+            project.investment(donation)
+            session.add(project)
+            session.add(donation)
+            await session.commit()
+            await session.refresh(donation)
+        return donation

@@ -28,8 +28,22 @@ class CharityBase(Base):
     create_date = Column(DateTime, default=datetime.now)
     close_date = Column(DateTime, nullable=True)
 
-    def __repr__(self) -> str:
-        return super().__repr__()
+    def investment(self, charity: 'CharityBase') -> None:
+        if self.fully_invested:
+            return
+        balance = self.full_amount - self.invested_amount
+        amount = charity.full_amount - charity.invested_amount
+        if amount >= balance:
+            self.close()
+            charity.invested_amount += balance
+            return
+        self.invested_amount += amount
+        charity.close()
+
+    def close(self) -> None:
+        self.invested_amount = self.full_amount
+        self.fully_invested = True
+        self.close_date = datetime.now()
 
 
 class CharityProject(CharityBase):

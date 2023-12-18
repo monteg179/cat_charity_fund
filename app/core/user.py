@@ -26,24 +26,30 @@ from app.core.db import get_async_session
 from app.models.user import User
 from app.schemas.user import UserCreate
 
+JWT_LIFETIME = 36000
+
 
 async def get_user_db(session: AsyncSession = Depends(get_async_session)):
     yield SQLAlchemyUserDatabase(session, User)
 
 
 def get_jwt_strategy() -> JWTStrategy:
-    return JWTStrategy(secret=settings.secret, lifetime_seconds=3600)
+    return JWTStrategy(secret=settings.secret, lifetime_seconds=JWT_LIFETIME)
 
 
 class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
+
+    MIN_LENGTH_PASSWORD = 3
+
     async def validate_password(
         self,
         password: str,
         user: Union[UserCreate, User],
     ) -> None:
-        if len(password) < 3:
+        if len(password) < UserManager.MIN_LENGTH_PASSWORD:
+            message = 'Password should be at least {} characters'
             raise InvalidPasswordException(
-                reason='Password should be at least 3 characters'
+                reason=message.format(UserManager.MIN_LENGTH_PASSWORD)
             )
         if user.email in password:
             raise InvalidPasswordException(
