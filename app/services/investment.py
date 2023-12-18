@@ -8,55 +8,45 @@ from app.models import (
 )
 
 
-class Investment:
+async def investment_query(
+    session: AsyncSession,
+    charity: type[CharityBase]
+) -> CharityBase:
+    query = await session.execute(
+        select(charity)
+        .where(charity.fully_invested == 0)
+        .order_by('create_date')
+    )
+    return query.scalars().first()
 
-    @staticmethod
-    async def query(session: AsyncSession, charity: type[CharityBase]) -> CharityBase:
-        query = await session.execute(
-            select(charity)
-            .where(charity.fully_invested == 0)
-            .order_by('create_date')
-        )
-        return query.scalars().first()
 
-    @staticmethod
-    async def process(session: AsyncSession, charity: CharityBase) -> CharityBase:
-        project = await Investment.query(session, CharityProject)
-        if not project:
-            await session.refresh(charity)
-            return charity
-        donation = await Investment.query(session, Donation)
+async def investment_project(
+    session: AsyncSession,
+    project: CharityProject
+) -> CharityProject:
+    while not project.fully_invested:
+        donation = await investment_query(session, Donation)
         if not donation:
-            await session.refresh(charity)
-            return charity
+            break
         project.investment(donation)
         session.add(project)
         session.add(donation)
         await session.commit()
-        return await Investment.process(session, charity)
+        await session.refresh(project)
+    return project
 
-    @staticmethod
-    async def project_process(session: AsyncSession, project: CharityProject) -> CharityProject:
-        while not project.fully_invested:
-            donation = await Investment.query(session, Donation)
-            if not donation:
-                break
-            project.investment(donation)
-            session.add(project)
-            session.add(donation)
-            await session.commit()
-            await session.refresh(project)
-        return project
 
-    @staticmethod
-    async def donation_process(session: AsyncSession, donation: Donation) -> Donation:
-        while not donation.fully_invested:
-            project = await Investment.query(session, CharityProject)
-            if not project:
-                break
-            project.investment(donation)
-            session.add(project)
-            session.add(donation)
-            await session.commit()
-            await session.refresh(donation)
-        return donation
+async def investment_donation(
+    session: AsyncSession,
+    donation: Donation
+) -> Donation:
+    while not donation.fully_invested:
+        project = await investment_query(session, CharityProject)
+        if not project:
+            break
+        project.investment(donation)
+        session.add(project)
+        session.add(donation)
+        await session.commit()
+        await session.refresh(donation)
+    return donation
